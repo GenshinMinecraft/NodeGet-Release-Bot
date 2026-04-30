@@ -33,7 +33,6 @@ struct Config {
     webhook_secret: String,
     repo_dir: PathBuf,
     github_repo: String,
-    asset_name: String,
     build_script: PathBuf,
 }
 
@@ -149,7 +148,6 @@ async fn run_build(config: &Config, tag: &str) -> anyhow::Result<()> {
         .current_dir(&config.repo_dir)
         .env("REPO_DIR", &config.repo_dir)
         .env("GITHUB_REPO", &config.github_repo)
-        .env("ASSET_NAME", &config.asset_name)
         .spawn()?;
 
     let status = child.wait().await?;
@@ -218,7 +216,6 @@ impl Config {
             webhook_secret: env_required("WEBHOOK_SECRET")?,
             repo_dir: PathBuf::from(env_or("REPO_DIR", "/root/NodeGet")),
             github_repo: env_or("GITHUB_REPO", "eeviriyi/NodeGet"),
-            asset_name: env_or("ASSET_NAME", "nodeget-linux-x86_64.tar.gz"),
             build_script: PathBuf::from(env_or(
                 "BUILD_SCRIPT",
                 "/root/NodeGet-Release-Bot/scripts/build-release.sh",
