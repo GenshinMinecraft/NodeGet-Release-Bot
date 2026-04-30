@@ -83,8 +83,10 @@ HOST=127.0.0.1
 PORT=8787
 WEBHOOK_PATH=/nodeget-release-webhook
 RUST_TOOLCHAIN=nightly
-CROSS_JOBS=4
-ENABLE_UPX=0
+BUILD_CONCURRENCY=8
+CROSS_JOBS=8
+CLEAN_BUILD=0
+ENABLE_UPX=1
 BUILD_TARGET_SET=all
 ALLOW_PARTIAL=1
 ```
@@ -98,6 +100,12 @@ ALLOW_PARTIAL=1
 `ALLOW_PARTIAL=1` uploads successful artifacts even if one target fails. Set it to `0` if any failed target should fail the whole release.
 
 `ENABLE_UPX=1` compresses binaries with `upx` when available. This is slower but produces smaller assets.
+
+`BUILD_CONCURRENCY` controls how many targets build at the same time. `CROSS_JOBS` controls the internal cargo jobs per target. On a large build server, start with `BUILD_CONCURRENCY=8` and `CROSS_JOBS=8`, then tune based on CPU, memory, and disk IO.
+
+`CLEAN_BUILD=0` keeps the shared `target/` cache between releases. Set `CLEAN_BUILD=1` when you need a fully clean rebuild.
+
+Build logs are written per target under `dist/logs`.
 
 Advanced overrides, usually unnecessary:
 

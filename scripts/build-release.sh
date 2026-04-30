@@ -13,10 +13,13 @@ REPO_DIR="${REPO_DIR:-/root/NodeGet}"
 GITHUB_REPO="${GITHUB_REPO:?GITHUB_REPO is required, for example owner/NodeGet}"
 CROSS_BIN="${CROSS_BIN:-cross}"
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-nightly}"
-CROSS_JOBS="${CROSS_JOBS:-$(nproc)}"
-ENABLE_UPX="${ENABLE_UPX:-0}"
+CROSS_JOBS="${CROSS_JOBS:-8}"
+BUILD_CONCURRENCY="${BUILD_CONCURRENCY:-8}"
+CLEAN_BUILD="${CLEAN_BUILD:-0}"
+ENABLE_UPX="${ENABLE_UPX:-1}"
 BUILD_TARGET_SET="${BUILD_TARGET_SET:-all}"
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-1}"
+BUILD_LOG_DIR="${BUILD_LOG_DIR:-dist/logs}"
 
 case "$BUILD_TARGET_SET" in
   all|linux|windows) ;;
@@ -25,6 +28,16 @@ case "$BUILD_TARGET_SET" in
     exit 2
     ;;
 esac
+
+if ! [[ "$BUILD_CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: BUILD_CONCURRENCY must be a positive integer" >&2
+  exit 2
+fi
+
+if ! [[ "$CROSS_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: CROSS_JOBS must be a positive integer" >&2
+  exit 2
+fi
 
 SERVER_TARGETS=(
   "x86_64-unknown-linux-musl|nodeget-server-linux-x86_64-musl|upx"
@@ -91,15 +104,39 @@ if [ "$ENABLE_UPX" = "1" ] && ! command -v upx >/dev/null 2>&1; then
   ENABLE_UPX=0
 fi
 
-echo "cleaning previous build output"
-if [ "$BUILD_TARGET_SET" = "windows" ]; then
-  echo "skipping cargo clean for windows-only build"
-else
+FAILED_TARGETS=()
+FAILED_LOGS=()
+WINDOWS_GNU_READY=0
+if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; then
+  if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+    echo "warning: x86_64-w64-mingw32-gcc is not installed; skipping Windows GNU builds" >&2
+    FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
+    if [ "$ALLOW_PARTIAL" != "1" ]; then
+      exit 1
+    fi
+  elif ! rustup target add x86_64-pc-windows-gnu --toolchain "$RUST_TOOLCHAIN"; then
+    echo "warning: failed to install x86_64-pc-windows-gnu target; skipping Windows GNU builds" >&2
+    FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
+    if [ "$ALLOW_PARTIAL" != "1" ]; then
+      exit 1
+    fi
+  else
+    WINDOWS_GNU_READY=1
+  fi
+fi
+
+echo "preparing build output"
+if [ "$CLEAN_BUILD" = "1" ]; then
+  echo "cleaning cargo target cache"
   cargo +"$RUST_TOOLCHAIN" clean
+else
+  echo "keeping cargo target cache"
 fi
 rm -rf dist
-mkdir -p dist/artifacts
-FAILED_TARGETS=()
+mkdir -p dist/artifacts "$BUILD_LOG_DIR"
+RUNNING_PIDS=()
+RUNNING_NAMES=()
+RUNNING_LOGS=()
 
 build_artifact() {
   local builder="$1"
@@ -148,55 +185,118 @@ build_artifact() {
   cp "$built" "dist/artifacts/$output_name"
 }
 
+stop_running_builds() {
+  if [ "${#RUNNING_PIDS[@]}" -eq 0 ]; then
+    return
+  fi
+
+  echo "stopping remaining build tasks" >&2
+  kill "${RUNNING_PIDS[@]}" >/dev/null 2>&1 || true
+}
+
+wait_for_next_task() {
+  local done_pid=""
+  local status=0
+  local index=-1
+  local task_name=""
+  local task_log=""
+
+  if [ "${#RUNNING_PIDS[@]}" -eq 0 ]; then
+    return
+  fi
+
+  set +e
+  wait -n -p done_pid "${RUNNING_PIDS[@]}"
+  status=$?
+  set -e
+
+  for i in "${!RUNNING_PIDS[@]}"; do
+    if [ "${RUNNING_PIDS[$i]}" = "$done_pid" ]; then
+      index="$i"
+      task_name="${RUNNING_NAMES[$i]}"
+      task_log="${RUNNING_LOGS[$i]}"
+      break
+    fi
+  done
+
+  if [ "$index" -lt 0 ]; then
+    echo "warning: finished unknown build task pid=$done_pid status=$status" >&2
+    return
+  fi
+
+  unset "RUNNING_PIDS[$index]"
+  unset "RUNNING_NAMES[$index]"
+  unset "RUNNING_LOGS[$index]"
+  RUNNING_PIDS=("${RUNNING_PIDS[@]}")
+  RUNNING_NAMES=("${RUNNING_NAMES[@]}")
+  RUNNING_LOGS=("${RUNNING_LOGS[@]}")
+
+  if [ "$status" -eq 0 ]; then
+    echo "finished $task_name"
+    return
+  fi
+
+  echo "failed $task_name; see $task_log" >&2
+  FAILED_TARGETS+=("$task_name")
+  FAILED_LOGS+=("$task_log")
+
+  if [ "$ALLOW_PARTIAL" != "1" ]; then
+    stop_running_builds
+    exit 1
+  fi
+}
+
+queue_build() {
+  local builder="$1"
+  local package="$2"
+  local source_name="$3"
+  local target="$4"
+  local output_name="$5"
+  local upx_mode="$6"
+  local task_name="$package:$target"
+  local task_log="$BUILD_LOG_DIR/$output_name.log"
+
+  echo "queued $task_name -> $output_name (log: $task_log)"
+  build_artifact "$builder" "$package" "$source_name" "$target" "$output_name" "$upx_mode" >"$task_log" 2>&1 &
+  RUNNING_PIDS+=("$!")
+  RUNNING_NAMES+=("$task_name")
+  RUNNING_LOGS+=("$task_log")
+
+  while [ "${#RUNNING_PIDS[@]}" -ge "$BUILD_CONCURRENCY" ]; do
+    wait_for_next_task
+  done
+}
+
+wait_for_all_tasks() {
+  while [ "${#RUNNING_PIDS[@]}" -gt 0 ]; do
+    wait_for_next_task
+  done
+}
+
+trap 'stop_running_builds; exit 130' INT TERM
+
+echo "building with concurrency=$BUILD_CONCURRENCY jobs=$CROSS_JOBS"
+
 if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
   for item in "${SERVER_TARGETS[@]}"; do
     IFS='|' read -r target output_name upx_mode <<< "$item"
-    if ! build_artifact "cross" "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
-      FAILED_TARGETS+=("nodeget-server:$target")
-      if [ "$ALLOW_PARTIAL" != "1" ]; then
-        exit 1
-      fi
-    fi
+    queue_build "cross" "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"
   done
 
   for item in "${AGENT_TARGETS[@]}"; do
     IFS='|' read -r target output_name upx_mode <<< "$item"
-    if ! build_artifact "cross" "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"; then
-      FAILED_TARGETS+=("nodeget-agent:$target")
-      if [ "$ALLOW_PARTIAL" != "1" ]; then
-        exit 1
-      fi
-    fi
+    queue_build "cross" "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"
   done
 fi
 
-if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; then
-  if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
-    echo "warning: x86_64-w64-mingw32-gcc is not installed; skipping Windows GNU builds" >&2
-    FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
-    if [ "$ALLOW_PARTIAL" != "1" ]; then
-      exit 1
-    fi
-  else
-    if ! rustup target add x86_64-pc-windows-gnu --toolchain "$RUST_TOOLCHAIN"; then
-      echo "warning: failed to install x86_64-pc-windows-gnu target; skipping Windows GNU builds" >&2
-      FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
-      if [ "$ALLOW_PARTIAL" != "1" ]; then
-        exit 1
-      fi
-    else
-      for item in "${WINDOWS_TARGETS[@]}"; do
-        IFS='|' read -r package source_name target output_name upx_mode <<< "$item"
-        if ! build_artifact "cargo" "$package" "$source_name" "$target" "$output_name" "$upx_mode"; then
-          FAILED_TARGETS+=("$package:$target")
-          if [ "$ALLOW_PARTIAL" != "1" ]; then
-            exit 1
-          fi
-        fi
-      done
-    fi
-  fi
+if { [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; } && [ "$WINDOWS_GNU_READY" = "1" ]; then
+  for item in "${WINDOWS_TARGETS[@]}"; do
+    IFS='|' read -r package source_name target output_name upx_mode <<< "$item"
+    queue_build "cargo" "$package" "$source_name" "$target" "$output_name" "$upx_mode"
+  done
 fi
+
+wait_for_all_tasks
 
 echo "built artifacts"
 ls -lh dist/artifacts
@@ -209,6 +309,11 @@ fi
 if [ "${#FAILED_TARGETS[@]}" -gt 0 ]; then
   echo "warning: some targets failed and were skipped:" >&2
   printf '  - %s\n' "${FAILED_TARGETS[@]}" >&2
+
+  if [ "${#FAILED_LOGS[@]}" -gt 0 ]; then
+    echo "failed target logs:" >&2
+    printf '  - %s\n' "${FAILED_LOGS[@]}" >&2
+  fi
 fi
 
 echo "publishing GitHub release $TAG"
