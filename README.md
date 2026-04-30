@@ -2,7 +2,7 @@
 
 Rust webhook service for building NodeGet releases on your own server.
 
-It receives GitHub push webhooks, verifies `X-Hub-Signature-256`, responds only to `refs/tags/v*`, builds NodeGet Linux binaries on your VPS with `cross`, and uploads GitHub Release assets with `gh`.
+It receives GitHub push webhooks, verifies `X-Hub-Signature-256`, responds only to `refs/tags/v*`, builds NodeGet Linux binaries with `cross`, builds Windows x86_64 GNU binaries with MinGW, and uploads GitHub Release assets with `gh`.
 
 ## Runtime Defaults
 
@@ -11,7 +11,7 @@ It receives GitHub push webhooks, verifies `X-Hub-Signature-256`, responds only 
 - NodeGet repo path: `/root/NodeGet`
 - GitHub repo: `eeviriyi/NodeGet`
 - Rust toolchain for NodeGet: `nightly`
-- Linux release artifacts: individual binaries named like `nodeget-server-linux-x86_64-musl`
+- Release artifacts: individual binaries named like `nodeget-server-linux-x86_64-musl` and `nodeget-server-windows-x86_64.exe`
 
 ## Server Requirements
 
@@ -19,6 +19,7 @@ It receives GitHub push webhooks, verifies `X-Hub-Signature-256`, responds only 
 - Rust nightly for building NodeGet
 - Docker or Podman for `cross`
 - `cross` installed in the service PATH
+- MinGW for Windows x86_64 GNU builds
 - `gh` authenticated with release permissions
 - Existing NodeGet checkout at `/root/NodeGet`
 - Caddy reverse proxy to `127.0.0.1:8787`
@@ -29,9 +30,10 @@ Install build dependencies:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential pkg-config libssl-dev docker.io
+sudo apt-get install -y build-essential pkg-config libssl-dev docker.io gcc-mingw-w64-x86-64
 sudo systemctl enable --now docker
 cargo install cross --git https://github.com/cross-rs/cross
+rustup target add x86_64-pc-windows-gnu
 ```
 
 Optional compression:
@@ -71,10 +73,13 @@ CROSS_BIN=cross
 RUST_TOOLCHAIN=nightly
 CROSS_JOBS=32
 ENABLE_UPX=0
+ENABLE_WINDOWS_GNU=1
 ALLOW_PARTIAL=1
 ```
 
 `ALLOW_PARTIAL=1` uploads every successful architecture even if a target fails because a dependency or toolchain does not support it. Set `ALLOW_PARTIAL=0` if you want one failed target to fail the whole release.
+
+`ENABLE_WINDOWS_GNU=1` enables Linux-hosted Windows x86_64 `.exe` builds using `x86_64-pc-windows-gnu`. This is not the same as upstream's Windows MSVC build, but it is the practical Windows target for a single Linux build server.
 
 ## Run Manually
 
@@ -134,8 +139,9 @@ The bot will:
 1. Fetch the tag.
 2. Check out the tag.
 3. Run `cross build --profile minimal` for Linux server and agent targets.
-4. Rename binaries using the upstream release naming style.
-5. Create or update the GitHub Release assets.
+4. Run `cargo build --target x86_64-pc-windows-gnu --profile minimal` for Windows x86_64 server and agent targets.
+5. Rename binaries using the upstream release naming style.
+6. Create or update the GitHub Release assets.
 
 ## Linux Targets
 
@@ -175,4 +181,11 @@ Agent artifacts:
 - `nodeget-agent-linux-s390x-gnu`
 - `nodeget-agent-linux-sparc64-gnu`
 
-This bot intentionally builds Linux artifacts only. Windows and macOS releases need native runners, separate machines, or a different build path.
+## Windows Targets
+
+These are built on Linux with MinGW:
+
+- `nodeget-server-windows-x86_64.exe`
+- `nodeget-agent-windows-x86_64.exe`
+
+macOS releases still need a macOS runner, separate Mac machine, or a different build path.

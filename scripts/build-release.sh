@@ -15,6 +15,7 @@ CROSS_BIN="${CROSS_BIN:-cross}"
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-nightly}"
 CROSS_JOBS="${CROSS_JOBS:-$(nproc)}"
 ENABLE_UPX="${ENABLE_UPX:-0}"
+ENABLE_WINDOWS_GNU="${ENABLE_WINDOWS_GNU:-1}"
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-1}"
 
 SERVER_TARGETS=(
@@ -51,6 +52,11 @@ AGENT_TARGETS=(
   "powerpc64le-unknown-linux-gnu|nodeget-agent-linux-powerpc64le-gnu|no-upx"
   "s390x-unknown-linux-gnu|nodeget-agent-linux-s390x-gnu|no-upx"
   "sparc64-unknown-linux-gnu|nodeget-agent-linux-sparc64-gnu|no-upx"
+)
+
+WINDOWS_TARGETS=(
+  "nodeget-server|nodeget-server.exe|x86_64-pc-windows-gnu|nodeget-server-windows-x86_64.exe|upx"
+  "nodeget-agent|nodeget-agent.exe|x86_64-pc-windows-gnu|nodeget-agent-windows-x86_64.exe|upx"
 )
 
 cd "$REPO_DIR"
@@ -112,6 +118,37 @@ build_one() {
   cp "$built" "dist/artifacts/$output_name"
 }
 
+build_cargo_one() {
+  local package="$1"
+  local source_name="$2"
+  local target="$3"
+  local output_name="$4"
+  local upx_mode="$5"
+
+  echo "building $package for $target -> $output_name"
+  if ! cargo +"$RUST_TOOLCHAIN" build \
+    --package "$package" \
+    --target "$target" \
+    --profile minimal \
+    --jobs "$CROSS_JOBS"; then
+    echo "error: build failed for $package on $target" >&2
+    return 1
+  fi
+
+  local built="target/$target/minimal/$source_name"
+  if [ ! -f "$built" ]; then
+    echo "error: expected binary not found: $built" >&2
+    return 1
+  fi
+
+  if [ "$ENABLE_UPX" = "1" ] && [ "$upx_mode" = "upx" ]; then
+    echo "compressing $built with upx"
+    upx --brute "$built"
+  fi
+
+  cp "$built" "dist/artifacts/$output_name"
+}
+
 for item in "${SERVER_TARGETS[@]}"; do
   IFS='|' read -r target output_name upx_mode <<< "$item"
   if ! build_one "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
@@ -131,6 +168,34 @@ for item in "${AGENT_TARGETS[@]}"; do
     fi
   fi
 done
+
+if [ "$ENABLE_WINDOWS_GNU" = "1" ]; then
+  if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+    echo "warning: x86_64-w64-mingw32-gcc is not installed; skipping Windows GNU builds" >&2
+    FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
+    if [ "$ALLOW_PARTIAL" != "1" ]; then
+      exit 1
+    fi
+  else
+    if ! rustup target add x86_64-pc-windows-gnu; then
+      echo "warning: failed to install x86_64-pc-windows-gnu target; skipping Windows GNU builds" >&2
+      FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
+      if [ "$ALLOW_PARTIAL" != "1" ]; then
+        exit 1
+      fi
+    else
+      for item in "${WINDOWS_TARGETS[@]}"; do
+        IFS='|' read -r package source_name target output_name upx_mode <<< "$item"
+        if ! build_cargo_one "$package" "$source_name" "$target" "$output_name" "$upx_mode"; then
+          FAILED_TARGETS+=("$package:$target")
+          if [ "$ALLOW_PARTIAL" != "1" ]; then
+            exit 1
+          fi
+        fi
+      done
+    fi
+  fi
+fi
 
 echo "built artifacts"
 ls -lh dist/artifacts
@@ -152,7 +217,7 @@ else
   gh release create "$TAG" dist/artifacts/* \
     --repo "$GITHUB_REPO" \
     --title "$TAG" \
-    --notes "NodeGet Linux binaries built with cross on self-hosted release server."
+    --notes "NodeGet Linux and Windows GNU binaries built on self-hosted release server."
 fi
 
 echo "release ready: https://github.com/$GITHUB_REPO/releases/tag/$TAG"
