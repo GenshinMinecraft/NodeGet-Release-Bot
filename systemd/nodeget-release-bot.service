@@ -1,0 +1,15 @@
+[Unit]
+Description=NodeGet Release Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/NodeGet-Release-Bot
+EnvironmentFile=/root/NodeGet-Release-Bot/.env
+ExecStart=/root/NodeGet-Release-Bot/target/release/nodeget-release-bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
