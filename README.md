@@ -1,32 +1,36 @@
 # NodeGet-Release-Bot
 
-Rust webhook service for building NodeGet releases on your own server.
+Self-hosted GitHub webhook service for building and publishing NodeGet releases.
 
-It receives GitHub push webhooks, verifies `X-Hub-Signature-256`, responds only to `refs/tags/v*`, builds NodeGet Linux binaries with `cross`, builds Windows x86_64 GNU binaries with MinGW, and uploads GitHub Release assets with `gh`.
+The bot receives GitHub push webhooks, verifies `X-Hub-Signature-256`, accepts only `refs/tags/v*`, queues builds one at a time, then runs `scripts/build-release.sh` and uploads release assets with `gh`.
 
-## Runtime Defaults
+## What It Builds
 
-- Public webhook: `https://release.aqa.cc/nodeget-release-webhook`
-- Local listen: `127.0.0.1:8787`
-- NodeGet repo path: `/root/NodeGet`
-- GitHub repo: `eeviriyi/NodeGet`
-- Rust toolchain for NodeGet: `nightly`
-- Release artifacts: individual binaries named like `nodeget-server-linux-x86_64-musl` and `nodeget-server-windows-x86_64.exe`
+- Linux server binaries with `cross`
+- Linux agent binaries with `cross`
+- Windows x86_64 GNU server and agent binaries with MinGW
 
-## Server Requirements
+Artifact names follow the upstream release style, for example:
 
+- `nodeget-server-linux-x86_64-musl`
+- `nodeget-agent-linux-aarch64-gnu`
+- `nodeget-server-windows-x86_64.exe`
+- `nodeget-agent-windows-x86_64.exe`
+
+macOS and Windows MSVC/aarch64 builds are not handled by this Linux-hosted bot.
+
+## Requirements
+
+- Existing NodeGet checkout
 - Rust stable for this bot
 - Rust nightly for building NodeGet
 - Docker or Podman for `cross`
-- `cross` installed in the service PATH
+- `cross` available in `PATH`
 - MinGW for Windows x86_64 GNU builds
-- `gh` authenticated with release permissions
-- Existing NodeGet checkout at `/root/NodeGet`
-- Caddy reverse proxy to `127.0.0.1:8787`
+- `gh` authenticated with permission to create releases
+- A reverse proxy, such as Caddy or nginx, if exposing the webhook publicly
 
-You already verified manual release creation with `gh`, so the same auth is reused.
-
-Install build dependencies:
+On Debian/Ubuntu:
 
 ```bash
 sudo apt-get update
@@ -36,7 +40,7 @@ cargo install cross --git https://github.com/cross-rs/cross
 rustup target add x86_64-pc-windows-gnu --toolchain nightly
 ```
 
-Optional compression:
+Optional binary compression:
 
 ```bash
 sudo apt-get install -y upx
@@ -60,31 +64,49 @@ Generate a webhook secret:
 openssl rand -hex 32
 ```
 
-Put it in `.env`:
+Use the same value for `.env` and the GitHub webhook secret.
+
+## Configuration
+
+Minimal `.env`:
 
 ```env
-WEBHOOK_SECRET=...
+WEBHOOK_SECRET=replace-with-openssl-rand-hex-32
+REPO_DIR=/root/NodeGet
+GITHUB_REPO=owner/NodeGet
 ```
 
-Cross-build settings:
+Common options:
 
 ```env
-CROSS_BIN=cross
+HOST=127.0.0.1
+PORT=8787
+WEBHOOK_PATH=/nodeget-release-webhook
 RUST_TOOLCHAIN=nightly
-CROSS_JOBS=32
+CROSS_JOBS=4
 ENABLE_UPX=0
-ENABLE_WINDOWS_GNU=1
 BUILD_TARGET_SET=all
 ALLOW_PARTIAL=1
 ```
 
-`ALLOW_PARTIAL=1` uploads every successful architecture even if a target fails because a dependency or toolchain does not support it. Set `ALLOW_PARTIAL=0` if you want one failed target to fail the whole release.
+`BUILD_TARGET_SET` controls what the build script produces:
 
-`ENABLE_WINDOWS_GNU=1` enables Linux-hosted Windows x86_64 `.exe` builds using `x86_64-pc-windows-gnu`. This is not the same as upstream's Windows MSVC build, but it is the practical Windows target for a single Linux build server.
+- `all`: Linux plus Windows x86_64 GNU
+- `linux`: Linux only
+- `windows`: Windows x86_64 GNU only, useful for backfilling assets into an existing release
 
-`BUILD_TARGET_SET` can be `all`, `linux`, or `windows`. Use `windows` when you only need to backfill Windows assets into an existing release.
+`ALLOW_PARTIAL=1` uploads successful artifacts even if one target fails. Set it to `0` if any failed target should fail the whole release.
 
-## Run Manually
+`ENABLE_UPX=1` compresses binaries with `upx` when available. This is slower but produces smaller assets.
+
+Advanced overrides, usually unnecessary:
+
+- `BUILD_SCRIPT`: path to a custom build script
+- `CROSS_BIN`: alternative `cross` executable name or path
+
+## Run
+
+Manual:
 
 ```bash
 ./target/release/nodeget-release-bot
@@ -96,7 +118,7 @@ Health check:
 curl -I http://127.0.0.1:8787/health
 ```
 
-## systemd
+systemd:
 
 ```bash
 sudo cp systemd/nodeget-release-bot.service /etc/systemd/system/
@@ -105,97 +127,64 @@ sudo systemctl enable --now nodeget-release-bot
 sudo systemctl status nodeget-release-bot --no-pager
 ```
 
+The included service file assumes the bot is installed at `/root/NodeGet-Release-Bot`. If you use another path, update `WorkingDirectory`, `EnvironmentFile`, and `ExecStart`.
+
 Logs:
 
 ```bash
 sudo journalctl -u nodeget-release-bot -f
 ```
 
-## Caddy
+## Reverse Proxy
+
+Example Caddy config:
 
 ```caddyfile
-release.aqa.cc {
+release.example.com {
     reverse_proxy 127.0.0.1:8787
 }
 ```
 
+The public webhook URL would then be:
+
+```text
+https://release.example.com/nodeget-release-webhook
+```
+
 ## GitHub Webhook
 
-Repository settings:
+In the target NodeGet repository settings:
 
-- Payload URL: `https://release.aqa.cc/nodeget-release-webhook`
+- Payload URL: your public webhook URL
 - Content type: `application/json`
 - Secret: same value as `WEBHOOK_SECRET`
-- Events: `Pushes`
+- Events: push events
+- Active: enabled
 
 ## Release Flow
 
-Push a tag:
+Push a version tag in the NodeGet repository:
 
 ```bash
 git tag v0.0.4-custom.1
 git push origin v0.0.4-custom.1
 ```
 
-The bot will:
-
-1. Fetch the tag.
-2. Check out the tag.
-3. Run `cross build --profile minimal` for Linux server and agent targets.
-4. Run `cargo build --target x86_64-pc-windows-gnu --profile minimal` for Windows x86_64 server and agent targets.
-5. Rename binaries using the upstream release naming style.
-6. Create or update the GitHub Release assets.
+The bot will fetch the tag, check it out, build configured targets, and create or update the GitHub Release.
 
 Backfill only Windows assets into an existing tag:
 
 ```bash
 cd /root/NodeGet-Release-Bot
-BUILD_TARGET_SET=windows ./scripts/build-release.sh v0.0.0-test.7
+BUILD_TARGET_SET=windows ./scripts/build-release.sh v0.0.4-custom.1
 ```
 
-## Linux Targets
+## Targets
 
-Server artifacts:
+Current output count with `BUILD_TARGET_SET=all` is 32 files:
 
-- `nodeget-server-linux-x86_64-musl`
-- `nodeget-server-linux-x86_64-gnu`
-- `nodeget-server-linux-arm-gnueabi`
-- `nodeget-server-linux-arm-gnueabihf`
-- `nodeget-server-linux-aarch64-gnu`
-- `nodeget-server-linux-aarch64-musl`
-- `nodeget-server-linux-armv7-gnueabi`
-- `nodeget-server-linux-armv7-gnueabihf`
-- `nodeget-server-linux-armv7-musleabi`
-- `nodeget-server-linux-armv7-musleabihf`
+- 10 Linux server binaries
+- 20 Linux agent binaries
+- 2 Windows x86_64 GNU binaries
 
-Agent artifacts:
-
-- `nodeget-agent-linux-x86_64-musl`
-- `nodeget-agent-linux-x86_64-gnu`
-- `nodeget-agent-linux-i686-gnu`
-- `nodeget-agent-linux-i686-musl`
-- `nodeget-agent-linux-aarch64-gnu`
-- `nodeget-agent-linux-aarch64-musl`
-- `nodeget-agent-linux-arm-gnueabi`
-- `nodeget-agent-linux-arm-gnueabihf`
-- `nodeget-agent-linux-arm-musleabi`
-- `nodeget-agent-linux-arm-musleabihf`
-- `nodeget-agent-linux-armv7-gnueabi`
-- `nodeget-agent-linux-armv7-gnueabihf`
-- `nodeget-agent-linux-armv7-musleabi`
-- `nodeget-agent-linux-armv7-musleabihf`
-- `nodeget-agent-linux-thumbv7neon-gnueabihf`
-- `nodeget-agent-linux-riscv64gc-gnu`
-- `nodeget-agent-linux-powerpc64-gnu`
-- `nodeget-agent-linux-powerpc64le-gnu`
-- `nodeget-agent-linux-s390x-gnu`
-- `nodeget-agent-linux-sparc64-gnu`
-
-## Windows Targets
-
-These are built on Linux with MinGW:
-
-- `nodeget-server-windows-x86_64.exe`
-- `nodeget-agent-windows-x86_64.exe`
-
-macOS releases still need a macOS runner, separate Mac machine, or a different build path.
+The exact target list is defined in `scripts/build-release.sh`.

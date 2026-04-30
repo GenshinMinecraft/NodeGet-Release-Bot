@@ -244,7 +244,7 @@ impl Config {
             webhook_path: env_or("WEBHOOK_PATH", "/nodeget-release-webhook"),
             webhook_secret: env_required("WEBHOOK_SECRET")?,
             repo_dir: PathBuf::from(env_or("REPO_DIR", "/root/NodeGet")),
-            github_repo: env_or("GITHUB_REPO", "eeviriyi/NodeGet"),
+            github_repo: env_required("GITHUB_REPO")?,
             build_script: PathBuf::from(env_or(
                 "BUILD_SCRIPT",
                 "/root/NodeGet-Release-Bot/scripts/build-release.sh",

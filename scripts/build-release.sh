@@ -10,12 +10,11 @@ export PATH="$CARGO_HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 
 TAG="${1:?usage: build-release.sh <tag>}"
 REPO_DIR="${REPO_DIR:-/root/NodeGet}"
-GITHUB_REPO="${GITHUB_REPO:-eeviriyi/NodeGet}"
+GITHUB_REPO="${GITHUB_REPO:?GITHUB_REPO is required, for example owner/NodeGet}"
 CROSS_BIN="${CROSS_BIN:-cross}"
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-nightly}"
 CROSS_JOBS="${CROSS_JOBS:-$(nproc)}"
 ENABLE_UPX="${ENABLE_UPX:-0}"
-ENABLE_WINDOWS_GNU="${ENABLE_WINDOWS_GNU:-1}"
 BUILD_TARGET_SET="${BUILD_TARGET_SET:-all}"
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-1}"
 
@@ -186,7 +185,7 @@ if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
   done
 fi
 
-if { [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; } && [ "$ENABLE_WINDOWS_GNU" = "1" ]; then
+if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; then
   if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
     echo "warning: x86_64-w64-mingw32-gcc is not installed; skipping Windows GNU builds" >&2
     FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
