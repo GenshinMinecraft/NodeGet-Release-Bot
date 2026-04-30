@@ -7,6 +7,10 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/root/NodeGet-Release-Bot
 EnvironmentFile=/root/NodeGet-Release-Bot/.env
+Environment=HOME=/root
+Environment=CARGO_HOME=/root/.cargo
+Environment=RUSTUP_HOME=/root/.rustup
+Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/root/NodeGet-Release-Bot/target/release/nodeget-release-bot
 Restart=always
 RestartSec=5

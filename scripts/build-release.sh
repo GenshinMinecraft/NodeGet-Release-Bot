@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# systemd services can run with a very small environment. Keep Rust tooling
+# paths explicit so the build works outside an interactive shell.
+export HOME="${HOME:-/root}"
+export CARGO_HOME="${CARGO_HOME:-/root/.cargo}"
+export RUSTUP_HOME="${RUSTUP_HOME:-/root/.rustup}"
+export PATH="$CARGO_HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 TAG="${1:?usage: build-release.sh <tag>}"
 REPO_DIR="${REPO_DIR:-/root/NodeGet}"
 GITHUB_REPO="${GITHUB_REPO:-eeviriyi/NodeGet}"
