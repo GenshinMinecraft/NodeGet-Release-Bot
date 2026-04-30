@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{self, Sender};
 use tracing::{error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -22,7 +23,8 @@ type HmacSha256 = Hmac<Sha256>;
 #[derive(Clone)]
 struct AppState {
     config: Arc<Config>,
-    running_tags: Arc<Mutex<HashSet<String>>>,
+    known_tags: Arc<Mutex<HashSet<String>>>,
+    build_tx: Sender<String>,
 }
 
 #[derive(Debug)]
@@ -60,9 +62,15 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Arc::new(Config::from_env()?);
+    let known_tags = Arc::new(Mutex::new(HashSet::new()));
+    let (build_tx, build_rx) = mpsc::channel(32);
+
+    tokio::spawn(build_worker(config.clone(), known_tags.clone(), build_rx));
+
     let state = AppState {
         config: config.clone(),
-        running_tags: Arc::new(Mutex::new(HashSet::new())),
+        known_tags,
+        build_tx,
     };
 
     let app = Router::new()
@@ -113,31 +121,52 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
     if let Some(full_name) = payload.repository.and_then(|repo| repo.full_name)
         && full_name != state.config.github_repo
     {
-        warn!(repo = full_name, expected = state.config.github_repo, "repository mismatch");
-        return json_response(StatusCode::FORBIDDEN, json!({ "error": "repository mismatch" }));
+        warn!(
+            repo = full_name,
+            expected = state.config.github_repo,
+            "repository mismatch"
+        );
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "repository mismatch" }),
+        );
     }
 
     let tag = payload.r#ref.trim_start_matches("refs/tags/").to_owned();
     {
-        let mut running = state.running_tags.lock().await;
-        if !running.insert(tag.clone()) {
+        let mut known = state.known_tags.lock().await;
+        if !known.insert(tag.clone()) {
             return json_response(
                 StatusCode::OK,
-                json!({ "ok": true, "ignored": format!("already running {tag}") }),
+                json!({ "ok": true, "ignored": format!("already queued or running {tag}") }),
             );
         }
     }
 
-    let run_state = state.clone();
-    let run_tag = tag.clone();
-    tokio::spawn(async move {
-        if let Err(e) = run_build(&run_state.config, &run_tag).await {
-            error!(tag = run_tag, error = %e, "release build failed");
-        }
-        run_state.running_tags.lock().await.remove(&run_tag);
-    });
+    if let Err(e) = state.build_tx.try_send(tag.clone()) {
+        state.known_tags.lock().await.remove(&tag);
+        warn!(tag, error = %e, "build queue is unavailable");
+        return json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "error": "build queue unavailable" }),
+        );
+    }
 
     json_response(StatusCode::OK, json!({ "ok": true, "queued": tag }))
+}
+
+async fn build_worker(
+    config: Arc<Config>,
+    known_tags: Arc<Mutex<HashSet<String>>>,
+    mut build_rx: mpsc::Receiver<String>,
+) {
+    while let Some(tag) = build_rx.recv().await {
+        if let Err(e) = run_build(&config, &tag).await {
+            error!(tag, error = %e, "release build failed");
+        }
+
+        known_tags.lock().await.remove(&tag);
+    }
 }
 
 async fn run_build(config: &Config, tag: &str) -> anyhow::Result<()> {
