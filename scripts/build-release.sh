@@ -16,7 +16,16 @@ RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-nightly}"
 CROSS_JOBS="${CROSS_JOBS:-$(nproc)}"
 ENABLE_UPX="${ENABLE_UPX:-0}"
 ENABLE_WINDOWS_GNU="${ENABLE_WINDOWS_GNU:-1}"
+BUILD_TARGET_SET="${BUILD_TARGET_SET:-all}"
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-1}"
+
+case "$BUILD_TARGET_SET" in
+  all|linux|windows) ;;
+  *)
+    echo "error: BUILD_TARGET_SET must be one of: all, linux, windows" >&2
+    exit 2
+    ;;
+esac
 
 SERVER_TARGETS=(
   "x86_64-unknown-linux-musl|nodeget-server-linux-x86_64-musl|upx"
@@ -65,15 +74,17 @@ echo "fetching tag $TAG"
 git fetch --tags origin
 git checkout --force "$TAG"
 
-if ! command -v "$CROSS_BIN" >/dev/null 2>&1; then
-  echo "error: cross is not installed or not in PATH" >&2
-  echo "install it with: cargo install cross --git https://github.com/cross-rs/cross" >&2
-  exit 127
-fi
+if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
+  if ! command -v "$CROSS_BIN" >/dev/null 2>&1; then
+    echo "error: cross is not installed or not in PATH" >&2
+    echo "install it with: cargo install cross --git https://github.com/cross-rs/cross" >&2
+    exit 127
+  fi
 
-if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
-  echo "error: cross requires docker or podman" >&2
-  exit 127
+  if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+    echo "error: cross requires docker or podman" >&2
+    exit 127
+  fi
 fi
 
 if [ "$ENABLE_UPX" = "1" ] && ! command -v upx >/dev/null 2>&1; then
@@ -82,7 +93,11 @@ if [ "$ENABLE_UPX" = "1" ] && ! command -v upx >/dev/null 2>&1; then
 fi
 
 echo "cleaning previous build output"
-cargo +"$RUST_TOOLCHAIN" clean
+if [ "$BUILD_TARGET_SET" = "windows" ]; then
+  echo "skipping cargo clean for windows-only build"
+else
+  cargo +"$RUST_TOOLCHAIN" clean
+fi
 rm -rf dist
 mkdir -p dist/artifacts
 FAILED_TARGETS=()
@@ -149,27 +164,29 @@ build_cargo_one() {
   cp "$built" "dist/artifacts/$output_name"
 }
 
-for item in "${SERVER_TARGETS[@]}"; do
-  IFS='|' read -r target output_name upx_mode <<< "$item"
-  if ! build_one "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
-    FAILED_TARGETS+=("nodeget-server:$target")
-    if [ "$ALLOW_PARTIAL" != "1" ]; then
-      exit 1
+if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
+  for item in "${SERVER_TARGETS[@]}"; do
+    IFS='|' read -r target output_name upx_mode <<< "$item"
+    if ! build_one "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
+      FAILED_TARGETS+=("nodeget-server:$target")
+      if [ "$ALLOW_PARTIAL" != "1" ]; then
+        exit 1
+      fi
     fi
-  fi
-done
+  done
 
-for item in "${AGENT_TARGETS[@]}"; do
-  IFS='|' read -r target output_name upx_mode <<< "$item"
-  if ! build_one "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"; then
-    FAILED_TARGETS+=("nodeget-agent:$target")
-    if [ "$ALLOW_PARTIAL" != "1" ]; then
-      exit 1
+  for item in "${AGENT_TARGETS[@]}"; do
+    IFS='|' read -r target output_name upx_mode <<< "$item"
+    if ! build_one "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"; then
+      FAILED_TARGETS+=("nodeget-agent:$target")
+      if [ "$ALLOW_PARTIAL" != "1" ]; then
+        exit 1
+      fi
     fi
-  fi
-done
+  done
+fi
 
-if [ "$ENABLE_WINDOWS_GNU" = "1" ]; then
+if { [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; } && [ "$ENABLE_WINDOWS_GNU" = "1" ]; then
   if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
     echo "warning: x86_64-w64-mingw32-gcc is not installed; skipping Windows GNU builds" >&2
     FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")

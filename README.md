@@ -74,12 +74,15 @@ RUST_TOOLCHAIN=nightly
 CROSS_JOBS=32
 ENABLE_UPX=0
 ENABLE_WINDOWS_GNU=1
+BUILD_TARGET_SET=all
 ALLOW_PARTIAL=1
 ```
 
 `ALLOW_PARTIAL=1` uploads every successful architecture even if a target fails because a dependency or toolchain does not support it. Set `ALLOW_PARTIAL=0` if you want one failed target to fail the whole release.
 
 `ENABLE_WINDOWS_GNU=1` enables Linux-hosted Windows x86_64 `.exe` builds using `x86_64-pc-windows-gnu`. This is not the same as upstream's Windows MSVC build, but it is the practical Windows target for a single Linux build server.
+
+`BUILD_TARGET_SET` can be `all`, `linux`, or `windows`. Use `windows` when you only need to backfill Windows assets into an existing release.
 
 ## Run Manually
 
@@ -142,6 +145,13 @@ The bot will:
 4. Run `cargo build --target x86_64-pc-windows-gnu --profile minimal` for Windows x86_64 server and agent targets.
 5. Rename binaries using the upstream release naming style.
 6. Create or update the GitHub Release assets.
+
+Backfill only Windows assets into an existing tag:
+
+```bash
+cd /root/NodeGet-Release-Bot
+BUILD_TARGET_SET=windows ./scripts/build-release.sh v0.0.0-test.7
+```
 
 ## Linux Targets
 
