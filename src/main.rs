@@ -23,7 +23,7 @@ type HmacSha256 = Hmac<Sha256>;
 #[derive(Clone)]
 struct AppState {
     config: Arc<Config>,
-    known_tags: Arc<Mutex<HashSet<String>>>,
+    active_tags: Arc<Mutex<HashSet<String>>>,
     build_tx: Sender<String>,
 }
 
@@ -50,6 +50,15 @@ struct Repository {
     full_name: Option<String>,
 }
 
+#[derive(Debug)]
+enum SignatureError {
+    Missing,
+    BadFormat,
+    BadEncoding,
+    BadSecret,
+    Mismatch,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
@@ -62,14 +71,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Arc::new(Config::from_env()?);
-    let known_tags = Arc::new(Mutex::new(HashSet::new()));
+    let active_tags = Arc::new(Mutex::new(HashSet::new()));
     let (build_tx, build_rx) = mpsc::channel(32);
 
-    tokio::spawn(build_worker(config.clone(), known_tags.clone(), build_rx));
+    tokio::spawn(build_worker(config.clone(), active_tags.clone(), build_rx));
 
     let state = AppState {
         config: config.clone(),
-        known_tags,
+        active_tags,
         build_tx,
     };
 
@@ -91,8 +100,8 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(response) = verify_signature(&state.config.webhook_secret, &headers, &body) {
-        return response;
+    if let Err(error) = verify_signature(&state.config.webhook_secret, &headers, &body) {
+        return signature_error_response(error);
     }
 
     let event = headers
@@ -134,8 +143,8 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
 
     let tag = payload.r#ref.trim_start_matches("refs/tags/").to_owned();
     {
-        let mut known = state.known_tags.lock().await;
-        if !known.insert(tag.clone()) {
+        let mut active_tags = state.active_tags.lock().await;
+        if !active_tags.insert(tag.clone()) {
             return json_response(
                 StatusCode::OK,
                 json!({ "ok": true, "ignored": format!("already queued or running {tag}") }),
@@ -144,7 +153,7 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
     }
 
     if let Err(e) = state.build_tx.try_send(tag.clone()) {
-        state.known_tags.lock().await.remove(&tag);
+        state.active_tags.lock().await.remove(&tag);
         warn!(tag, error = %e, "build queue is unavailable");
         return json_response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -157,7 +166,7 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
 
 async fn build_worker(
     config: Arc<Config>,
-    known_tags: Arc<Mutex<HashSet<String>>>,
+    active_tags: Arc<Mutex<HashSet<String>>>,
     mut build_rx: mpsc::Receiver<String>,
 ) {
     while let Some(tag) = build_rx.recv().await {
@@ -165,7 +174,7 @@ async fn build_worker(
             error!(tag, error = %e, "release build failed");
         }
 
-        known_tags.lock().await.remove(&tag);
+        active_tags.lock().await.remove(&tag);
     }
 }
 
@@ -188,48 +197,38 @@ async fn run_build(config: &Config, tag: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn verify_signature(secret: &str, headers: &HeaderMap, body: &[u8]) -> Result<(), Response> {
+fn verify_signature(secret: &str, headers: &HeaderMap, body: &[u8]) -> Result<(), SignatureError> {
     let Some(signature) = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())
     else {
-        return Err(json_response(
-            StatusCode::UNAUTHORIZED,
-            json!({ "error": "missing signature" }),
-        ));
+        return Err(SignatureError::Missing);
     };
 
     let Some(actual_hex) = signature.strip_prefix("sha256=") else {
-        return Err(json_response(
-            StatusCode::UNAUTHORIZED,
-            json!({ "error": "bad signature format" }),
-        ));
+        return Err(SignatureError::BadFormat);
     };
 
-    let actual = match hex::decode(actual_hex) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return Err(json_response(
-                StatusCode::UNAUTHORIZED,
-                json!({ "error": "bad signature encoding" }),
-            ));
-        }
-    };
+    let actual = hex::decode(actual_hex).map_err(|_| SignatureError::BadEncoding)?;
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
-        json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": "bad secret" }),
-        )
-    })?;
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| SignatureError::BadSecret)?;
     mac.update(body);
 
-    mac.verify_slice(&actual).map_err(|_| {
-        json_response(
-            StatusCode::UNAUTHORIZED,
-            json!({ "error": "bad signature" }),
-        )
-    })
+    mac.verify_slice(&actual)
+        .map_err(|_| SignatureError::Mismatch)
+}
+
+fn signature_error_response(error: SignatureError) -> Response {
+    let (status, message) = match error {
+        SignatureError::Missing => (StatusCode::UNAUTHORIZED, "missing signature"),
+        SignatureError::BadFormat => (StatusCode::UNAUTHORIZED, "bad signature format"),
+        SignatureError::BadEncoding => (StatusCode::UNAUTHORIZED, "bad signature encoding"),
+        SignatureError::BadSecret => (StatusCode::INTERNAL_SERVER_ERROR, "bad secret"),
+        SignatureError::Mismatch => (StatusCode::UNAUTHORIZED, "bad signature"),
+    };
+
+    json_response(status, json!({ "error": message }))
 }
 
 fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
