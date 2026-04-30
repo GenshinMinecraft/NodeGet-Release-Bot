@@ -101,53 +101,38 @@ rm -rf dist
 mkdir -p dist/artifacts
 FAILED_TARGETS=()
 
-build_one() {
-  local package="$1"
-  local source_name="$2"
-  local target="$3"
-  local output_name="$4"
-  local upx_mode="$5"
+build_artifact() {
+  local builder="$1"
+  local package="$2"
+  local source_name="$3"
+  local target="$4"
+  local output_name="$5"
+  local upx_mode="$6"
 
   echo "building $package for $target -> $output_name"
-  if ! RUSTUP_TOOLCHAIN="$RUST_TOOLCHAIN" "$CROSS_BIN" build \
-    --package "$package" \
-    --target "$target" \
-    --profile minimal \
-    --jobs "$CROSS_JOBS"; then
+  case "$builder" in
+    cross)
+      RUSTUP_TOOLCHAIN="$RUST_TOOLCHAIN" "$CROSS_BIN" build \
+        --package "$package" \
+        --target "$target" \
+        --profile minimal \
+        --jobs "$CROSS_JOBS"
+      ;;
+    cargo)
+      cargo +"$RUST_TOOLCHAIN" build \
+        --package "$package" \
+        --target "$target" \
+        --profile minimal \
+        --jobs "$CROSS_JOBS"
+      ;;
+    *)
+      echo "error: unknown builder: $builder" >&2
+      return 2
+      ;;
+  esac || {
     echo "error: build failed for $package on $target" >&2
     return 1
-  fi
-
-  local built="target/$target/minimal/$source_name"
-  if [ ! -f "$built" ]; then
-    echo "error: expected binary not found: $built" >&2
-    return 1
-  fi
-
-  if [ "$ENABLE_UPX" = "1" ] && [ "$upx_mode" = "upx" ]; then
-    echo "compressing $built with upx"
-    upx --brute "$built"
-  fi
-
-  cp "$built" "dist/artifacts/$output_name"
-}
-
-build_cargo_one() {
-  local package="$1"
-  local source_name="$2"
-  local target="$3"
-  local output_name="$4"
-  local upx_mode="$5"
-
-  echo "building $package for $target -> $output_name"
-  if ! cargo +"$RUST_TOOLCHAIN" build \
-    --package "$package" \
-    --target "$target" \
-    --profile minimal \
-    --jobs "$CROSS_JOBS"; then
-    echo "error: build failed for $package on $target" >&2
-    return 1
-  fi
+  }
 
   local built="target/$target/minimal/$source_name"
   if [ ! -f "$built" ]; then
@@ -166,7 +151,7 @@ build_cargo_one() {
 if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
   for item in "${SERVER_TARGETS[@]}"; do
     IFS='|' read -r target output_name upx_mode <<< "$item"
-    if ! build_one "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
+    if ! build_artifact "cross" "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"; then
       FAILED_TARGETS+=("nodeget-server:$target")
       if [ "$ALLOW_PARTIAL" != "1" ]; then
         exit 1
@@ -176,7 +161,7 @@ if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
 
   for item in "${AGENT_TARGETS[@]}"; do
     IFS='|' read -r target output_name upx_mode <<< "$item"
-    if ! build_one "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"; then
+    if ! build_artifact "cross" "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"; then
       FAILED_TARGETS+=("nodeget-agent:$target")
       if [ "$ALLOW_PARTIAL" != "1" ]; then
         exit 1
@@ -202,7 +187,7 @@ if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; then
     else
       for item in "${WINDOWS_TARGETS[@]}"; do
         IFS='|' read -r package source_name target output_name upx_mode <<< "$item"
-        if ! build_cargo_one "$package" "$source_name" "$target" "$output_name" "$upx_mode"; then
+        if ! build_artifact "cargo" "$package" "$source_name" "$target" "$output_name" "$upx_mode"; then
           FAILED_TARGETS+=("$package:$target")
           if [ "$ALLOW_PARTIAL" != "1" ]; then
             exit 1
