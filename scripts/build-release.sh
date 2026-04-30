@@ -177,7 +177,7 @@ if [ "$ENABLE_WINDOWS_GNU" = "1" ]; then
       exit 1
     fi
   else
-    if ! rustup target add x86_64-pc-windows-gnu; then
+    if ! rustup target add x86_64-pc-windows-gnu --toolchain "$RUST_TOOLCHAIN"; then
       echo "warning: failed to install x86_64-pc-windows-gnu target; skipping Windows GNU builds" >&2
       FAILED_TARGETS+=("windows:x86_64-pc-windows-gnu")
       if [ "$ALLOW_PARTIAL" != "1" ]; then

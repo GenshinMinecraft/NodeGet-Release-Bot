@@ -33,7 +33,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential pkg-config libssl-dev docker.io gcc-mingw-w64-x86-64
 sudo systemctl enable --now docker
 cargo install cross --git https://github.com/cross-rs/cross
-rustup target add x86_64-pc-windows-gnu
+rustup target add x86_64-pc-windows-gnu --toolchain nightly
 ```
 
 Optional compression:
