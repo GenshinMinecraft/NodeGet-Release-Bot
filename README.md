@@ -95,6 +95,7 @@ ALLOW_PARTIAL=1
 
 - `all`: Linux plus Windows x86_64 GNU
 - `linux`: Linux only
+- `linux-x86_64`: Linux x86_64 GNU server and agent only, useful for quick smoke tests
 - `windows`: Windows x86_64 GNU only, useful for backfilling assets into an existing release
 
 `ALLOW_PARTIAL=1` uploads successful artifacts even if one target fails. Set it to `0` if any failed target should fail the whole release.

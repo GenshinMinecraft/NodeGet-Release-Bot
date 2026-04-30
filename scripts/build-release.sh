@@ -22,9 +22,9 @@ ALLOW_PARTIAL="${ALLOW_PARTIAL:-1}"
 BUILD_LOG_DIR="${BUILD_LOG_DIR:-dist/logs}"
 
 case "$BUILD_TARGET_SET" in
-  all|linux|windows) ;;
+  all|linux|linux-x86_64|windows) ;;
   *)
-    echo "error: BUILD_TARGET_SET must be one of: all, linux, windows" >&2
+    echo "error: BUILD_TARGET_SET must be one of: all, linux, linux-x86_64, windows" >&2
     exit 2
     ;;
 esac
@@ -86,7 +86,7 @@ echo "fetching tag $TAG"
 git fetch --tags origin
 git checkout --force "$TAG"
 
-if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
+if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ] || [ "$BUILD_TARGET_SET" = "linux-x86_64" ]; then
   if ! command -v "$CROSS_BIN" >/dev/null 2>&1; then
     echo "error: cross is not installed or not in PATH" >&2
     echo "install it with: cargo install cross --git https://github.com/cross-rs/cross" >&2
@@ -276,6 +276,13 @@ wait_for_all_tasks() {
 trap 'stop_running_builds; exit 130' INT TERM
 
 echo "building with concurrency=$BUILD_CONCURRENCY jobs=$CROSS_JOBS"
+
+if [ "$BUILD_TARGET_SET" = "linux-x86_64" ]; then
+  queue_build "cross" "nodeget-server" "nodeget-server" \
+    "x86_64-unknown-linux-gnu" "nodeget-server-linux-x86_64-gnu" "upx"
+  queue_build "cross" "nodeget-agent" "nodeget-agent" \
+    "x86_64-unknown-linux-gnu" "nodeget-agent-linux-x86_64-gnu" "upx"
+fi
 
 if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
   for item in "${SERVER_TARGETS[@]}"; do
