@@ -39,45 +39,39 @@ if ! [[ "$CROSS_JOBS" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-SERVER_TARGETS=(
-  "x86_64-unknown-linux-musl|nodeget-server-linux-x86_64-musl|upx"
-  "x86_64-unknown-linux-gnu|nodeget-server-linux-x86_64-gnu|upx"
-  "arm-unknown-linux-gnueabi|nodeget-server-linux-arm-gnueabi|upx"
-  "arm-unknown-linux-gnueabihf|nodeget-server-linux-arm-gnueabihf|upx"
-  "aarch64-unknown-linux-gnu|nodeget-server-linux-aarch64-gnu|upx"
-  "aarch64-unknown-linux-musl|nodeget-server-linux-aarch64-musl|upx"
-  "armv7-unknown-linux-gnueabi|nodeget-server-linux-armv7-gnueabi|upx"
-  "armv7-unknown-linux-gnueabihf|nodeget-server-linux-armv7-gnueabihf|upx"
-  "armv7-unknown-linux-musleabi|nodeget-server-linux-armv7-musleabi|upx"
-  "armv7-unknown-linux-musleabihf|nodeget-server-linux-armv7-musleabihf|upx"
-)
-
-AGENT_TARGETS=(
-  "x86_64-unknown-linux-musl|nodeget-agent-linux-x86_64-musl|upx"
-  "x86_64-unknown-linux-gnu|nodeget-agent-linux-x86_64-gnu|upx"
-  "i686-unknown-linux-gnu|nodeget-agent-linux-i686-gnu|upx"
-  "i686-unknown-linux-musl|nodeget-agent-linux-i686-musl|upx"
-  "aarch64-unknown-linux-gnu|nodeget-agent-linux-aarch64-gnu|upx"
-  "aarch64-unknown-linux-musl|nodeget-agent-linux-aarch64-musl|upx"
-  "arm-unknown-linux-gnueabi|nodeget-agent-linux-arm-gnueabi|upx"
-  "arm-unknown-linux-gnueabihf|nodeget-agent-linux-arm-gnueabihf|upx"
-  "arm-unknown-linux-musleabi|nodeget-agent-linux-arm-musleabi|upx"
-  "arm-unknown-linux-musleabihf|nodeget-agent-linux-arm-musleabihf|upx"
-  "armv7-unknown-linux-gnueabi|nodeget-agent-linux-armv7-gnueabi|upx"
-  "armv7-unknown-linux-gnueabihf|nodeget-agent-linux-armv7-gnueabihf|upx"
-  "armv7-unknown-linux-musleabi|nodeget-agent-linux-armv7-musleabi|upx"
-  "armv7-unknown-linux-musleabihf|nodeget-agent-linux-armv7-musleabihf|upx"
-  "thumbv7neon-unknown-linux-gnueabihf|nodeget-agent-linux-thumbv7neon-gnueabihf|upx"
-  "riscv64gc-unknown-linux-gnu|nodeget-agent-linux-riscv64gc-gnu|no-upx"
-  "powerpc64-unknown-linux-gnu|nodeget-agent-linux-powerpc64-gnu|no-upx"
-  "powerpc64le-unknown-linux-gnu|nodeget-agent-linux-powerpc64le-gnu|no-upx"
-  "s390x-unknown-linux-gnu|nodeget-agent-linux-s390x-gnu|no-upx"
-  "sparc64-unknown-linux-gnu|nodeget-agent-linux-sparc64-gnu|no-upx"
-)
-
-WINDOWS_TARGETS=(
-  "nodeget-server|nodeget-server.exe|x86_64-pc-windows-gnu|nodeget-server-windows-x86_64.exe|upx"
-  "nodeget-agent|nodeget-agent.exe|x86_64-pc-windows-gnu|nodeget-agent-windows-x86_64.exe|upx"
+BUILD_TASKS=(
+  "linux|cross|nodeget-server|nodeget-server|x86_64-unknown-linux-musl|nodeget-server-linux-x86_64-musl|upx"
+  "linux,linux-x86_64|cross|nodeget-server|nodeget-server|x86_64-unknown-linux-gnu|nodeget-server-linux-x86_64-gnu|upx"
+  "linux|cross|nodeget-server|nodeget-server|arm-unknown-linux-gnueabi|nodeget-server-linux-arm-gnueabi|upx"
+  "linux|cross|nodeget-server|nodeget-server|arm-unknown-linux-gnueabihf|nodeget-server-linux-arm-gnueabihf|upx"
+  "linux|cross|nodeget-server|nodeget-server|aarch64-unknown-linux-gnu|nodeget-server-linux-aarch64-gnu|upx"
+  "linux|cross|nodeget-server|nodeget-server|aarch64-unknown-linux-musl|nodeget-server-linux-aarch64-musl|upx"
+  "linux|cross|nodeget-server|nodeget-server|armv7-unknown-linux-gnueabi|nodeget-server-linux-armv7-gnueabi|upx"
+  "linux|cross|nodeget-server|nodeget-server|armv7-unknown-linux-gnueabihf|nodeget-server-linux-armv7-gnueabihf|upx"
+  "linux|cross|nodeget-server|nodeget-server|armv7-unknown-linux-musleabi|nodeget-server-linux-armv7-musleabi|upx"
+  "linux|cross|nodeget-server|nodeget-server|armv7-unknown-linux-musleabihf|nodeget-server-linux-armv7-musleabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|x86_64-unknown-linux-musl|nodeget-agent-linux-x86_64-musl|upx"
+  "linux,linux-x86_64|cross|nodeget-agent|nodeget-agent|x86_64-unknown-linux-gnu|nodeget-agent-linux-x86_64-gnu|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|i686-unknown-linux-gnu|nodeget-agent-linux-i686-gnu|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|i686-unknown-linux-musl|nodeget-agent-linux-i686-musl|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|aarch64-unknown-linux-gnu|nodeget-agent-linux-aarch64-gnu|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|aarch64-unknown-linux-musl|nodeget-agent-linux-aarch64-musl|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|arm-unknown-linux-gnueabi|nodeget-agent-linux-arm-gnueabi|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|arm-unknown-linux-gnueabihf|nodeget-agent-linux-arm-gnueabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|arm-unknown-linux-musleabi|nodeget-agent-linux-arm-musleabi|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|arm-unknown-linux-musleabihf|nodeget-agent-linux-arm-musleabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|armv7-unknown-linux-gnueabi|nodeget-agent-linux-armv7-gnueabi|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|armv7-unknown-linux-gnueabihf|nodeget-agent-linux-armv7-gnueabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|armv7-unknown-linux-musleabi|nodeget-agent-linux-armv7-musleabi|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|armv7-unknown-linux-musleabihf|nodeget-agent-linux-armv7-musleabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|thumbv7neon-unknown-linux-gnueabihf|nodeget-agent-linux-thumbv7neon-gnueabihf|upx"
+  "linux|cross|nodeget-agent|nodeget-agent|riscv64gc-unknown-linux-gnu|nodeget-agent-linux-riscv64gc-gnu|no-upx"
+  "linux|cross|nodeget-agent|nodeget-agent|powerpc64-unknown-linux-gnu|nodeget-agent-linux-powerpc64-gnu|no-upx"
+  "linux|cross|nodeget-agent|nodeget-agent|powerpc64le-unknown-linux-gnu|nodeget-agent-linux-powerpc64le-gnu|no-upx"
+  "linux|cross|nodeget-agent|nodeget-agent|s390x-unknown-linux-gnu|nodeget-agent-linux-s390x-gnu|no-upx"
+  "linux|cross|nodeget-agent|nodeget-agent|sparc64-unknown-linux-gnu|nodeget-agent-linux-sparc64-gnu|no-upx"
+  "windows|cargo|nodeget-server|nodeget-server.exe|x86_64-pc-windows-gnu|nodeget-server-windows-x86_64.exe|upx"
+  "windows|cargo|nodeget-agent|nodeget-agent.exe|x86_64-pc-windows-gnu|nodeget-agent-windows-x86_64.exe|upx"
 )
 
 cd "$REPO_DIR"
@@ -273,35 +267,43 @@ wait_for_all_tasks() {
   done
 }
 
+group_contains() {
+  local groups="$1"
+  local wanted="$2"
+
+  case ",$groups," in
+    *",$wanted,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+should_queue_task() {
+  local groups="$1"
+
+  if [ "$BUILD_TARGET_SET" = "all" ]; then
+    return 0
+  fi
+
+  group_contains "$groups" "$BUILD_TARGET_SET"
+}
+
 trap 'stop_running_builds; exit 130' INT TERM
 
 echo "building with concurrency=$BUILD_CONCURRENCY jobs=$CROSS_JOBS"
 
-if [ "$BUILD_TARGET_SET" = "linux-x86_64" ]; then
-  queue_build "cross" "nodeget-server" "nodeget-server" \
-    "x86_64-unknown-linux-gnu" "nodeget-server-linux-x86_64-gnu" "upx"
-  queue_build "cross" "nodeget-agent" "nodeget-agent" \
-    "x86_64-unknown-linux-gnu" "nodeget-agent-linux-x86_64-gnu" "upx"
-fi
+for item in "${BUILD_TASKS[@]}"; do
+  IFS='|' read -r groups builder package source_name target output_name upx_mode <<< "$item"
 
-if [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "linux" ]; then
-  for item in "${SERVER_TARGETS[@]}"; do
-    IFS='|' read -r target output_name upx_mode <<< "$item"
-    queue_build "cross" "nodeget-server" "nodeget-server" "$target" "$output_name" "$upx_mode"
-  done
+  if ! should_queue_task "$groups"; then
+    continue
+  fi
 
-  for item in "${AGENT_TARGETS[@]}"; do
-    IFS='|' read -r target output_name upx_mode <<< "$item"
-    queue_build "cross" "nodeget-agent" "nodeget-agent" "$target" "$output_name" "$upx_mode"
-  done
-fi
+  if group_contains "$groups" "windows" && [ "$WINDOWS_GNU_READY" != "1" ]; then
+    continue
+  fi
 
-if { [ "$BUILD_TARGET_SET" = "all" ] || [ "$BUILD_TARGET_SET" = "windows" ]; } && [ "$WINDOWS_GNU_READY" = "1" ]; then
-  for item in "${WINDOWS_TARGETS[@]}"; do
-    IFS='|' read -r package source_name target output_name upx_mode <<< "$item"
-    queue_build "cargo" "$package" "$source_name" "$target" "$output_name" "$upx_mode"
-  done
-fi
+  queue_build "$builder" "$package" "$source_name" "$target" "$output_name" "$upx_mode"
+done
 
 wait_for_all_tasks
 
