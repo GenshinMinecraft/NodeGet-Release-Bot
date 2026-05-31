@@ -140,12 +140,15 @@ build_artifact() {
   local output_name="$5"
   local upx_mode="$6"
 
-  echo "building $package for $target -> $output_name"
+  local target_dir="target-parallel/${output_name}"
+
+  echo "building $package for $target -> $output_name (target-dir: $target_dir)"
   case "$builder" in
     cross)
       RUSTUP_TOOLCHAIN="$RUST_TOOLCHAIN" "$CROSS_BIN" build \
         --package "$package" \
         --target "$target" \
+        --target-dir "$target_dir" \
         --profile minimal \
         --jobs "$CROSS_JOBS"
       ;;
@@ -153,6 +156,7 @@ build_artifact() {
       cargo +"$RUST_TOOLCHAIN" build \
         --package "$package" \
         --target "$target" \
+        --target-dir "$target_dir" \
         --profile minimal \
         --jobs "$CROSS_JOBS"
       ;;
@@ -165,7 +169,7 @@ build_artifact() {
     return 1
   }
 
-  local built="target/$target/minimal/$source_name"
+  local built="$target_dir/$target/minimal/$source_name"
   if [ ! -f "$built" ]; then
     echo "error: expected binary not found: $built" >&2
     return 1
@@ -323,6 +327,11 @@ if [ "${#FAILED_TARGETS[@]}" -gt 0 ]; then
     echo "failed target logs:" >&2
     printf '  - %s\n' "${FAILED_LOGS[@]}" >&2
   fi
+fi
+
+if [ "$CLEAN_BUILD" = "1" ]; then
+  echo "cleaning parallel target directories"
+  rm -rf target-parallel
 fi
 
 echo "publishing GitHub release $TAG"
